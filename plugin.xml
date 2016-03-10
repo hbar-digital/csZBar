@@ -47,7 +47,7 @@
         <source-file src="android/ZBar.java" target-dir="src/org/cloudsky/cordovaPlugins" />
         <source-file src="android/ZBarScannerActivity.java" target-dir="src/org/cloudsky/cordovaPlugins" />
 
-        <source-file src="src/android/build-extras.gradle" target-dir="../android" />
+        <source-file src="android/build-extras.gradle" target-dir="../android" />
     </platform>
 
 </plugin>
