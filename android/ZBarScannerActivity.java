@@ -54,7 +54,7 @@ public class ZBarScannerActivity extends Activity implements SurfaceHolder.Callb
     {
         super.onCreate(savedInstanceState);
 
-        setContentView(R.id.csZbarScannerView);
+        setContentView(R.layout.cszbarscanner);
 
 
         // Create preview SurfaceView
