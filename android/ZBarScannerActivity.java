@@ -6,8 +6,12 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
 import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.PreviewCallback;
@@ -22,6 +26,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+import io.hbar.badgescanner.R;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,53 +34,18 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
-import net.sourceforge.zbar.ImageScanner;
-import net.sourceforge.zbar.Image;
-import net.sourceforge.zbar.Symbol;
-import net.sourceforge.zbar.SymbolSet;
-import net.sourceforge.zbar.Config;
-
-public class ZBarScannerActivity extends Activity
-implements SurfaceHolder.Callback {
-
-    //for barcode types
-    private Collection<ZBarcodeFormat> mFormats = null;
-
-    // Config ----------------------------------------------------------
-
-    private static int autoFocusInterval = 500; // Interval between AFcallback and next AF attempt.
-
-    // Public Constants ------------------------------------------------
-
-    public static final String EXTRA_QRVALUE = "qrValue";
-    public static final String EXTRA_PARAMS = "params";
+public class ZBarScannerActivity extends Activity implements SurfaceHolder.Callback {
     public static final int RESULT_ERROR = RESULT_FIRST_USER + 1;
 
     // State -----------------------------------------------------------
 
     private Camera camera;
-    private Handler autoFocusHandler;
     private SurfaceView scannerSurface;
+    private ARView arView;
     private SurfaceHolder holder;
-    private ImageScanner scanner;
+
     private int surfW, surfH;
 
-    // Customisable stuff
-    String whichCamera;
-    String flashMode;
-
-    // For retrieving R.* resources, from the actual app package
-    // (we can't use actual.application.package.R.* in our code as we
-    // don't know the applciation package name when writing this plugin).
-    private String package_name;
-    private Resources resources;
-
-    // Static initialisers (class) -------------------------------------
-
-    static {
-        // Needed by ZBar??
-        System.loadLibrary("iconv");
-    }
 
     // Activity Lifecycle ----------------------------------------------
 
@@ -84,45 +54,11 @@ implements SurfaceHolder.Callback {
     {
         super.onCreate(savedInstanceState);
 
-        // Get parameters from JS
-        Intent startIntent = getIntent();
-        String paramStr = startIntent.getStringExtra(EXTRA_PARAMS);
-        JSONObject params;
-        try { params = new JSONObject(paramStr); }
-        catch (JSONException e) { params = new JSONObject(); }
-        String textTitle = params.optString("text_title");
-        String textInstructions = params.optString("text_instructions");
-        Boolean drawSight = params.optBoolean("drawSight", true);
-        whichCamera = params.optString("camera");
-        flashMode = params.optString("flash");
+        setContentView(R.id.csZbarScannerView);
 
-        // Initiate instance variables
-        autoFocusHandler = new Handler();
-        scanner = new ImageScanner();
-        scanner.setConfig(0, Config.X_DENSITY, 3);
-        scanner.setConfig(0, Config.Y_DENSITY, 3);
-
-        // Set the config for barcode formats
-        for(ZBarcodeFormat format : getFormats()) {
-            scanner.setConfig(format.getId(), Config.ENABLE, 1);
-        }
-
-        // Set content view
-        setContentView(getResourceId("layout/cszbarscanner"));
-
-        // Update view with customisable strings
-        TextView view_textTitle = (TextView) findViewById(getResourceId("id/csZbarScannerTitle"));
-        TextView view_textInstructions = (TextView) findViewById(getResourceId("id/csZbarScannerInstructions"));
-        view_textTitle.setText(textTitle);
-        view_textInstructions.setText(textInstructions);
-
-        // Draw/hide the sight
-        if(!drawSight) {
-            findViewById(getResourceId("id/csZbarScannerSight")).setVisibility(View.INVISIBLE);
-        }
 
         // Create preview SurfaceView
-        scannerSurface = new SurfaceView (this) {
+        scannerSurface = new SurfaceView(this) {
             @Override
             public void onSizeChanged (int w, int h, int oldW, int oldH) {
                 surfW = w;
@@ -138,13 +74,20 @@ implements SurfaceHolder.Callback {
         scannerSurface.getHolder().addCallback(this);
 
         // Add preview SurfaceView to the screen
-        FrameLayout scannerView = (FrameLayout) findViewById(getResourceId("id/csZbarScannerView"));
+        FrameLayout scannerView = (FrameLayout) findViewById(R.id.csZbarScannerView);
         scannerView.addView(scannerSurface);
 
-        findViewById(getResourceId("id/csZbarScannerTitle")).bringToFront();
-        findViewById(getResourceId("id/csZbarScannerInstructions")).bringToFront();
-        findViewById(getResourceId("id/csZbarScannerSightContainer")).bringToFront();
-        findViewById(getResourceId("id/csZbarScannerSight")).bringToFront();
+
+        arView = new ARView(this);
+        arView.setLayoutParams(new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            Gravity.CENTER
+        ));
+
+        scannerView.addView(arView);
+        scannerView.bringChildToFront(arView);
+
         scannerView.requestLayout();
         scannerView.invalidate();
     }
@@ -154,44 +97,48 @@ implements SurfaceHolder.Callback {
     {
         super.onResume();
 
-        try {
-            if(whichCamera.equals("front")) {
-                int numCams = Camera.getNumberOfCameras();
-                CameraInfo cameraInfo = new CameraInfo();
-                for(int i=0; i<numCams; i++) {
-                    Camera.getCameraInfo(i, cameraInfo);
-                    if(cameraInfo.facing == CameraInfo.CAMERA_FACING_FRONT) {
-                        camera = Camera.open(i);
-                    }
-                }
-            } else {
-                camera = Camera.open();
-            }
+        // try {
+        //     if(whichCamera.equals("front")) {
+        //         int numCams = Camera.getNumberOfCameras();
+        //         CameraInfo cameraInfo = new CameraInfo();
+        //         for(int i=0; i<numCams; i++) {
+        //             Camera.getCameraInfo(i, cameraInfo);
+        //             if(cameraInfo.facing == CameraInfo.CAMERA_FACING_FRONT) {
+        //                 camera = Camera.open(i);
+        //             }
+        //         }
+        //     } else {
+        //         camera = Camera.open();
+        //     }
 
-            if(camera == null) throw new Exception ("Error: No suitable camera found.");
-        } catch (RuntimeException e) {
-            die("Error: Could not open the camera.");
-            return;
-        } catch (Exception e) {
-            die(e.getMessage());
-            return;
-        }
+        //     if(camera == null) throw new Exception ("Error: No suitable camera found.");
+        // } catch (RuntimeException e) {
+        //     die("Error: Could not open the camera.");
+        //     return;
+        // } catch (Exception e) {
+        //     die(e.getMessage());
+        //     return;
+        // }
+
+        camera = Camera.open();
 
         Camera.Parameters camParams = camera.getParameters();
-        if(flashMode.equals("on")) {
-            camParams.setFlashMode(Camera.Parameters.FLASH_MODE_ON);
-        } else if(flashMode.equals("off")) {
-            camParams.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
-        } else {
-            camParams.setFlashMode(Camera.Parameters.FLASH_MODE_AUTO);
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 14) {
-        	camParams.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
-        }
+        camParams.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
+
+        // if(flashMode.equals("on")) {
+        //     camParams.setFlashMode(Camera.Parameters.FLASH_MODE_ON);
+        // } else if(flashMode.equals("off")) {
+        //     camParams.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
+        // } else {
+        //     camParams.setFlashMode(Camera.Parameters.FLASH_MODE_AUTO);
+        // }
+        // if (android.os.Build.VERSION.SDK_INT >= 14) {
+        //  camParams.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+        // }
 
         try { camera.setParameters(camParams); }
         catch (RuntimeException e) {
-            Log.d("csZBar", "Unsupported camera parameter reported for flash mode: "+flashMode);
+            // Log.d("csZBar", "Unsupported camera parameter reported for flash mode: "+flashMode);
         }
 
         tryStartPreview();
@@ -207,7 +154,6 @@ implements SurfaceHolder.Callback {
     @Override
     public void onDestroy ()
     {
-        scanner.destroy();
         super.onDestroy();
     }
 
@@ -252,26 +198,6 @@ implements SurfaceHolder.Callback {
         tryStartPreview();
     }
 
-    // Continuously auto-focus -----------------------------------------
-    // For API Level < 14
-
-    private AutoFocusCallback autoFocusCb = new AutoFocusCallback()
-    {
-        public void onAutoFocus(boolean success, Camera camera) {
-            // some devices crash without this try/catch and cancelAutoFocus()... (#9)
-            try {
-                camera.cancelAutoFocus();
-                autoFocusHandler.postDelayed(doAutoFocus, autoFocusInterval);
-            } catch (Exception e) {}
-        }
-    };
-
-    private Runnable doAutoFocus = new Runnable()
-    {
-        public void run() {
-            if(camera != null) camera.autoFocus(autoFocusCb);
-        }
-    };
 
     // Camera callbacks ------------------------------------------------
 
@@ -282,24 +208,10 @@ implements SurfaceHolder.Callback {
             Camera.Parameters parameters = camera.getParameters();
             Camera.Size size = parameters.getPreviewSize();
 
-            Image barcode = new Image(size.width, size.height, "Y800");
-            barcode.setData(data);
+            // Image barcode = new Image(size.width, size.height, "Y800");
+            // barcode.setData(data);
 
-            if (scanner.scanImage(barcode) != 0) {
-                String qrValue = "";
-
-                SymbolSet syms = scanner.getResults();
-                for (Symbol sym : syms) {
-                    qrValue = sym.getData();
-
-                    // Return 1st found QR code value to the calling Activity.
-                    Intent result = new Intent ();
-                    result.putExtra(EXTRA_QRVALUE, qrValue);
-                    setResult(Activity.RESULT_OK, result);
-                    finish();
-                }
-
-            }
+            arView.drawCircle((float) (Math.random() * 100), (float) (Math.random() * 100), (float) (Math.random() * 100));
         }
     };
 
@@ -312,18 +224,9 @@ implements SurfaceHolder.Callback {
         finish();
     }
 
-    private int getResourceId (String typeAndName)
-    {
-        if(package_name == null) package_name = getApplication().getPackageName();
-        if(resources == null) resources = getApplication().getResources();
-        return resources.getIdentifier(typeAndName, null, package_name);
-    }
-
-    // Release the camera resources and state.
     private void releaseCamera ()
     {
         if (camera != null) {
-            autoFocusHandler.removeCallbacks(doAutoFocus);
             camera.setPreviewCallback(null);
             camera.release();
             camera = null;
@@ -367,12 +270,6 @@ implements SurfaceHolder.Callback {
         }
     }
 
-    public Collection<ZBarcodeFormat> getFormats() {
-        if(mFormats == null) {
-            return ZBarcodeFormat.ALL_FORMATS;
-        }
-        return mFormats;
-    }
 
 
     // Start the camera preview if possible.
@@ -387,16 +284,42 @@ implements SurfaceHolder.Callback {
                 camera.setPreviewCallback(previewCb);
                 camera.startPreview();
 
-                if (android.os.Build.VERSION.SDK_INT >= 14) {
-                    camera.autoFocus(autoFocusCb); // We are not using any of the
-                        // continuous autofocus modes as that does not seem to work
-                        // well with flash setting of "on"... At least with this
-                        // simple and stupid focus method, we get to turn the flash
-                        // on during autofocus.
-                }
+                
             } catch (IOException e) {
                 die("Could not start camera preview: " + e.getMessage());
             }
+        }
+    }
+
+    class ARView extends View {
+        private SurfaceHolder surfaceHolder;
+        private Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private float x = 0;
+        private float y = 0;
+        private float r = 0;
+
+        public ARView(Context context) {
+            super(context);
+        }
+
+        public void drawCircle(float x, float y, float r) {
+            this.x = x;
+            this.y = y;
+            this.r = r;
+
+            this.invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) { 
+            super.onDraw(canvas); 
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(3);
+            paint.setColor(Color.RED);
+
+            canvas.drawCircle(x, y, r, paint);
         }
     }
 }

@@ -41,7 +41,7 @@ public class ZBar extends CordovaPlugin {
 
                 Context appCtx = cordova.getActivity().getApplicationContext();
                 Intent scanIntent = new Intent(appCtx, ZBarScannerActivity.class);
-                scanIntent.putExtra(ZBarScannerActivity.EXTRA_PARAMS, params.toString());
+                // scanIntent.putExtra(ZBarScannerActivity.EXTRA_PARAMS, params.toString());
                 cordova.startActivityForResult(this, scanIntent, SCAN_CODE);
             }
             return true;
@@ -59,8 +59,8 @@ public class ZBar extends CordovaPlugin {
         if(requestCode == SCAN_CODE) {
             switch(resultCode) {
                 case Activity.RESULT_OK:
-                    String barcodeValue = result.getStringExtra(ZBarScannerActivity.EXTRA_QRVALUE);
-                    scanCallbackContext.success(barcodeValue);
+                    // String barcodeValue = result.getStringExtra(ZBarScannerActivity.EXTRA_QRVALUE);
+                    scanCallbackContext.success("barcodeValue");
                     break;
                 case Activity.RESULT_CANCELED:
                     scanCallbackContext.error("cancelled");
